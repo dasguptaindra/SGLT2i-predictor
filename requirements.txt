@@ -3,8 +3,9 @@ pandas>=1.5.0
 numpy>=1.21.0
 joblib>=1.2.0
 scikit-learn
-rdkit-pypi
 mordred>=1.2.0
 padelpy>=0.1.7
 streamlit-ketcher>=0.0.1
 matplotlib>=3.5.0
+rdkit-pypi==2023.9.6
+
