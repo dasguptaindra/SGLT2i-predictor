@@ -28,6 +28,6 @@ This model supports virtual screening workflows and accelerates early-stage drug
 
 ⭐ **Support**
 
-I**f you find this tool useful, please star ⭐ the repository and share it with researchers and students in cheminformatics and drug discovery!**
+**If you find this tool useful, share it with researchers and students in cheminformatics and drug discovery!**
 
 
