@@ -2,10 +2,8 @@ streamlit>=1.28.0
 pandas>=1.5.0
 numpy>=1.21.0
 joblib>=1.2.0
-scikit-learn<1.4
-rdkit-pypi==2022.9.5; python_version < '3.12'
+scikit-learn>=1.4.0  # Use newer version with Python 3.13 support
 mordred>=1.2.0
 padelpy>=0.1.7
 streamlit-ketcher>=0.0.1
-
 
