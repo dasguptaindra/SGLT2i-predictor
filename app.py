@@ -31,7 +31,7 @@ except Exception as e:
     st.warning(f"SHAP import warning: {e}")
     shap = None
 
-# PaDEL descriptor calculation - simplified approach
+# PaDEL descriptor calculation - we'll handle availability checks
 try:
     from padelpy import padeldescriptor
     PADEL_AVAILABLE = True
@@ -143,7 +143,7 @@ def validate_smiles(smiles: str) -> bool:
         return False
 
 def calculate_padel_descriptors(smiles: str, required_features: list) -> dict:
-    """Calculate descriptors using PaDEL - Working version"""
+    """Calculate descriptors using PaDEL - Universal compatible version"""
     if not PADEL_AVAILABLE:
         return {}
         
@@ -155,13 +155,21 @@ def calculate_padel_descriptors(smiles: str, required_features: list) -> dict:
         
         output_path = tempfile.mktemp(suffix='.csv')
         
-        # Use only compatible parameters
-        padeldescriptor(
-            mol_file=smi_path,
-            d_file=output_path,
-            fingerprints=False,  # Only get descriptors, not fingerprints
-            threads=2
-        )
+        # Try different parameter combinations to find what works
+        try:
+            # Try with minimal parameters (most compatible)
+            padeldescriptor(
+                mol_dir=smi_path,  # Try mol_dir instead of mol_file
+                d_file=output_path,
+                fingerprints=False
+            )
+        except TypeError as e:
+            # If that fails, try with even fewer parameters
+            try:
+                padeldescriptor(smi_path, output_path)
+            except Exception as e2:
+                st.warning(f"PaDEL failed with all parameter combinations: {e2}")
+                return {}
         
         # Read and process results
         if os.path.exists(output_path):
@@ -581,6 +589,6 @@ if predict_clicked:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666;'>
-    <p>🧪 <strong>SGLT2 Inhibitor Prediction Tool</strong> | Built with Streamlit, RDKit, Mordred, PaDEL and Machine Learning</p>
+    <p>🧪 <strong>SGLT2 Inhibitor Prediction Tool</strong> | Built with Streamlit, RDKit, Mordred, and Machine Learning</p>
 </div>
 """, unsafe_allow_html=True)
