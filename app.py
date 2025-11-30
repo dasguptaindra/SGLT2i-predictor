@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 import sys
+import pickle
 
 # Configure matplotlib to avoid GUI issues
 plt.switch_backend('Agg')
@@ -131,43 +132,135 @@ st.markdown("""
         padding: 10px;
         margin: 10px 0;
     }
+    .error-box {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 10px 0;
+        color: #721c24;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- MODEL & FEATURES LOADING --------------------
+# -------------------- MODEL & FEATURES LOADING WITH FALLBACKS --------------------
 @st.cache_resource
-def load_model():
-    """Load the trained model with caching"""
-    MODEL_PATH = "gradient_boosting_model.joblib"
-    if not os.path.exists(MODEL_PATH):
-        st.error(f"Model file not found: {MODEL_PATH}. Please ensure the model file is in the app directory.")
-        return None
+def load_model_with_fallback():
+    """Load the trained model with multiple fallback strategies"""
+    MODEL_PATHS = [
+        "gradient_boosting_model.pkl",
+        "model.pkl",
+        "sglt2_model.pkl",
+        "random_forest_model.pkl"
+    ]
+    
+    model = None
+    used_path = None
+    
+    for model_path in MODEL_PATHS:
+        if os.path.exists(model_path):
+            try:
+                st.info(f"Attempting to load model from: {model_path}")
+                
+                # Try joblib first
+                try:
+                    model = joblib.load(model_path)
+                    used_path = model_path
+                    st.success(f"✅ Model loaded successfully using joblib: {model_path}")
+                    break
+                except Exception as e:
+                    st.warning(f"Joblib failed for {model_path}: {e}")
+                
+                # Try pickle as fallback
+                try:
+                    with open(model_path, 'rb') as f:
+                        model = pickle.load(f)
+                    used_path = model_path
+                    st.success(f"✅ Model loaded successfully using pickle: {model_path}")
+                    break
+                except Exception as e:
+                    st.warning(f"Pickle failed for {model_path}: {e}")
+                    
+            except Exception as e:
+                st.warning(f"Failed to load {model_path}: {e}")
+                continue
+    
+    if model is None:
+        st.error("""
+        ❌ Could not load any model file. This is usually due to:
+        
+        1. **Missing model file** - Ensure you have a trained model file in the app directory
+        2. **Version mismatch** - The model was trained with different library versions
+        
+        **Solutions:**
+        - Place your model file (gradient_boosting_model.pkl) in the app directory
+        - Or train a new model using the code below
+        """)
+        
+        # Option to use a simple fallback model
+        if st.button("🚨 Use Simple Fallback Model (Limited Accuracy)"):
+            model = create_fallback_model()
+            if model is not None:
+                st.success("✅ Simple fallback model created. Predictions will have limited accuracy.")
+    
+    return model, used_path
+
+def create_fallback_model():
+    """Create a simple fallback model when main model fails"""
     try:
-        return joblib.load(MODEL_PATH)
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.datasets import make_classification
+        
+        # Create a dummy model (this would be replaced with actual trained model)
+        # For demo purposes only - in practice, you should use a properly trained model
+        X, y = make_classification(n_samples=100, n_features=10, random_state=42)
+        model = RandomForestClassifier(n_estimators=10, random_state=42)
+        model.fit(X, y)
+        
+        st.warning("⚠️ Using demo fallback model - predictions are for demonstration only")
+        return model
     except Exception as e:
-        st.error(f"Error loading model: {e}")
+        st.error(f"Failed to create fallback model: {e}")
         return None
 
 @st.cache_resource
 def load_features():
     """Load model features with caching"""
-    FEATURES_PATH = "model_features.json"
-    if not os.path.exists(FEATURES_PATH):
-        st.error(f"Features file not found: {FEATURES_PATH}. Please ensure the features file is in the app directory.")
-        return None
-    try:
-        with open(FEATURES_PATH, "r") as f:
-            return json.load(f)
-    except Exception as e:
-        st.error(f"Error loading features: {e}")
-        return None
+    FEATURE_PATHS = [
+        "model_features.json",
+        "features.json", 
+        "selected_features.json"
+    ]
+    
+    for feature_path in FEATURE_PATHS:
+        if os.path.exists(feature_path):
+            try:
+                with open(feature_path, "r") as f:
+                    features = json.load(f)
+                st.success(f"✅ Features loaded from: {feature_path}")
+                return features
+            except Exception as e:
+                st.warning(f"Failed to load features from {feature_path}: {e}")
+                continue
+    
+    # If no feature file found, create default features
+    st.warning("⚠️ No feature file found. Using default molecular descriptors.")
+    default_features = [
+        'nHBAcc_Lipinski', 'nHBDon_Lipinski', 'MolWt', 'MolLogP', 
+        'NumRotatableBonds', 'NumHeteroatoms', 'FractionCsp3',
+        'nC', 'nO', 'nN', 'nF', 'nCl', 'nS'
+    ]
+    return default_features
 
 # Load model and features
-model = load_model()
+model, model_path = load_model_with_fallback()
 model_features = load_features()
 
-if model is None or model_features is None:
-    st.stop()
+# Show model info if loaded
+if model is not None:
+    st.sidebar.success(f"✅ Model: {type(model).__name__}")
+    if model_path:
+        st.sidebar.info(f"📁 Source: {model_path}")
 
 # -------------------- HELPER FUNCTIONS --------------------
 def validate_smiles(smiles: str) -> bool:
@@ -370,6 +463,12 @@ with status_col2:
 if not RDKIT_AVAILABLE:
     st.sidebar.error("RDKit is required but not available. Basic functionality will be limited.")
 
+# Model status
+if model is None:
+    st.sidebar.error("❌ Model: Not loaded")
+else:
+    st.sidebar.success(f"✅ Model: Loaded")
+
 input_mode = st.sidebar.radio("Input Method:", ["SMILES String", "Draw Molecule"])
 
 smiles = ""
@@ -414,19 +513,43 @@ with example_col2:
 # Use example if selected
 if hasattr(st.session_state, 'example_smiles'):
     smiles = st.session_state.example_smiles
-    # Clear after use
-    if st.sidebar.button("Clear Example"):
-        del st.session_state.example_smiles
 
 # -------------------- MAIN PREDICTION AREA --------------------
 if not smiles:
     st.info("👈 Enter a SMILES string or draw a molecule in the sidebar to start")
     st.info("💡 Try the example molecules in the sidebar!")
+    
+    # Show troubleshooting if model failed to load
+    if model is None:
+        st.markdown("---")
+        st.subheader("🚨 Model Loading Issue Detected")
+        st.markdown("""
+        **To fix the model loading issue:**
+        
+        1. **Ensure you have a model file** in the app directory (e.g., `gradient_boosting_model.pkl`)
+        2. **Check library versions** - the model might have been trained with different versions
+        3. **Try retraining** the model with current library versions
+        
+        **Required files in your app directory:**
+        - `gradient_boosting_model.pkl` (or similar)
+        - `model_features.json` (list of features used by the model)
+        """)
+    
     st.stop()
 
 # Validate SMILES
 if not validate_smiles(smiles):
     st.error("❌ Invalid SMILES string — please check your input")
+    st.stop()
+
+# Check if model is available before proceeding
+if model is None:
+    st.error("""
+    ❌ No model available for predictions.
+    
+    Please ensure you have a trained model file in the app directory or 
+    click the fallback model button in the sidebar.
+    """)
     st.stop()
 
 # Display molecule and input area
@@ -542,7 +665,7 @@ if predict_clicked:
             st.info("Probability estimation not available for this model")
 
     # -------------------- SHAP INTERPRETATION --------------------
-    if SHAP_AVAILABLE and shap is not None:
+    if SHAP_AVAILABLE and shap is not None and model is not None:
         st.markdown("---")
         st.subheader("📈 Model Interpretation")
         
@@ -626,6 +749,42 @@ if predict_clicked:
                 st.info("SHAP explanation is not available for this prediction.")
     else:
         st.info("🔍 SHAP interpretation is not available. Install SHAP for model explanation features.")
+
+# -------------------- TROUBLESHOOTING SECTION --------------------
+st.markdown("---")
+with st.expander("🔧 Troubleshooting & Model Information"):
+    st.subheader("Model Information")
+    
+    if model is not None:
+        st.write(f"**Model Type:** {type(model).__name__}")
+        st.write(f"**Number of Features:** {len(model_features)}")
+        
+        if hasattr(model, 'n_estimators'):
+            st.write(f"**Number of Estimators:** {model.n_estimators}")
+    
+    st.subheader("Common Issues & Solutions")
+    
+    st.markdown("""
+    **1. Model Loading Errors:**
+    - **Cause:** Version mismatch between training and inference environments
+    - **Fix:** Retrain model with current library versions or match versions
+    
+    **2. Missing Dependencies:**
+    - RDKit: Required for molecular operations
+    - SHAP: Optional for model interpretation
+    - Mordred: Optional for advanced descriptors
+    
+    **3. Descriptor Calculation Issues:**
+    - Some descriptors may calculate as zero
+    - This is normal for certain molecule types
+    - The app uses RDKit fallbacks when Mordred fails
+    """)
+    
+    st.subheader("Required Files")
+    st.markdown("""
+    - `gradient_boosting_model.pkl` - Trained machine learning model
+    - `model_features.json` - List of features used by the model
+    """)
 
 # -------------------- FOOTER --------------------
 st.markdown("---")
