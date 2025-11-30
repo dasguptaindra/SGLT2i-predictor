@@ -1,8 +1,8 @@
 streamlit>=1.28.0
 pandas>=1.5.0
-numpy>=1.21.0
+numpy==1.24.3  # Pinned to stable version that works with scikit-learn 1.6.1
 joblib>=1.2.0
-scikit-learn==1.6.1  # Matches your Gradient Boosting model version
+scikit-learn==1.6.1
 rdkit-pypi
 matplotlib>=3.7.0
 shap>=0.43.0
