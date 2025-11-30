@@ -364,6 +364,6 @@ if predict_clicked:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666;'>
-    🧪 <strong>SGLT2 Inhibitor Prediction Tool</strong> | Built with Streamlit, RDKit, and Gradient Boosting
+    🧪 <strong>SGLT2 Inhibitor Prediction Tool</strong> | Built with Streamlit
 </div>
 """, unsafe_allow_html=True)
