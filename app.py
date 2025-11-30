@@ -138,7 +138,7 @@ st.markdown("""
 @st.cache_resource
 def load_model():
     """Load the trained model with caching"""
-    MODEL_PATH = "gradient_boosting_model.pkl"
+    MODEL_PATH = "gradient_boosting_model.joblib"
     if not os.path.exists(MODEL_PATH):
         st.error(f"Model file not found: {MODEL_PATH}. Please ensure the model file is in the app directory.")
         return None
