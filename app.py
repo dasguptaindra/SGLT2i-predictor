@@ -111,7 +111,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------- MODEL & FEATURES --------------------
-MODEL_PATH = "random_forest_model.joblib"
+MODEL_PATH = "GB_model.pkl"
 FEATURES_PATH = "model_features.json"
 
 if not os.path.exists(MODEL_PATH):
