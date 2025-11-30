@@ -263,9 +263,14 @@ with col2:
     desc_display['Status'] = ['⚠️' if x == 0.0 else '✅' for x in desc_display['Value']]
     st.dataframe(desc_display, use_container_width=True)
 
+    # Calculate percentage of zero descriptors
     zero_count = (desc_df.iloc[0] == 0.0).sum()
-    if zero_count > len(model_features) * 0.5:
-        st.warning(f"⚠️ {zero_count} descriptors calculated as zero. May affect accuracy.")
+    total_features = len(model_features)
+    zero_percentage = (zero_count / total_features) * 100
+    
+    # Only show warning if 90% or more descriptors are zero
+    if zero_percentage >= 90:
+        st.warning(f"⚠️ {zero_count}/{total_features} ({zero_percentage:.1f}%) descriptors calculated as zero. This may affect prediction accuracy.")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
