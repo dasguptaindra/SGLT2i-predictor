@@ -200,7 +200,6 @@ col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     st.markdown('<div class="drug-container"><div style="font-size:4rem;">🧪💊</div></div>', unsafe_allow_html=True)
     st.markdown('<div class="main-header">SGLT2 Inhibitor Predictor</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Gradient Boosting Model</div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
