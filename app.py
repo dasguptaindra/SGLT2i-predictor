@@ -11,7 +11,7 @@ from PIL import Image
 
 # -------- RDKit & Mordred --------
 from rdkit import Chem
-from rdkit.Chem import Draw, Lipinski
+from rdkit.Chem import Draw, Lipinski, AllChem
 from mordred import Calculator, descriptors
 import shap
 
@@ -45,8 +45,6 @@ model = joblib.load(MODEL_PATH)
 with open(FEATURES_PATH) as f:
     model_features = json.load(f)
 
-calc = Calculator(descriptors, ignore_3D=True)
-
 # ================= HELPER FUNCTIONS =================
 def validate_smiles(smiles):
     return Chem.MolFromSmiles(smiles) is not None
@@ -55,25 +53,54 @@ def draw_molecule(smiles):
     mol = Chem.MolFromSmiles(smiles)
     return Draw.MolToImage(mol, size=(300, 300)) if mol else None
 
+
 def calculate_descriptors(smiles):
+    """Calculate Mordred descriptors with proper 3D support (fixes minaaN)."""
+
     mol = Chem.MolFromSmiles(smiles)
+    mol = Chem.AddHs(mol)
+
+    # ---- Generate 3D conformer ----
+    AllChem.EmbedMolecule(mol, AllChem.ETKDG())
+    AllChem.UFFOptimizeMolecule(mol)
+
+    # ---- Enable 3D descriptors ----
+    calc = Calculator(descriptors, ignore_3D=False)
     mordred_vals = calc(mol)
+
     data = {}
+    failed = []
+
     for f in model_features:
         try:
-            data[f] = float(mordred_vals[f])
-        except:
+            val = mordred_vals[f]
+            if val is None or np.isnan(val) or np.isinf(val):
+                data[f] = 0.0
+                failed.append(f)
+            else:
+                data[f] = float(val)
+        except Exception:
             data[f] = 0.0
-    data["nHBAcc_Lipinski"] = Lipinski.NumHAcceptors(mol)
-    return pd.DataFrame([data]).fillna(0)
+            failed.append(f)
+
+    # ---- Explicit Lipinski descriptor ----
+    if "nHBAcc_Lipinski" in model_features:
+        data["nHBAcc_Lipinski"] = Lipinski.NumHAcceptors(mol)
+
+    if failed:
+        st.warning(f"⚠️ Descriptor calculation failed for: {failed}")
+
+    return pd.DataFrame([data])
+
 
 # ================= HEADER =================
 st.title("SGLT2i Predictor v1.0: Predict SGLT2 inhibitor(s)")
 
 with st.expander("What is SGLT2i Predictor?", expanded=True):
     st.write(
-        "**SGLT2i Predictor** allows users to predict the SGLT2 inhibitory activity of small molecules/drug molecules "
-        "using a machine learning model and provides SHAP-based interpretability."
+        "**SGLT2i Predictor** allows users to predict the SGLT2 inhibitory activity of "
+        "small molecules/drug molecules using a machine learning model and provides "
+        "SHAP-based interpretability."
     )
 
 # ================= INPUT SECTION =================
@@ -122,6 +149,7 @@ with col1:
 
 with col2:
     st.subheader("📈 SHAP Interpretation")
+
     explainer = shap.TreeExplainer(model)
     shap_vals = explainer.shap_values(desc_df)
 
