@@ -661,14 +661,31 @@ if predict_button:
                         from the base value (average prediction) to the final prediction.
                         """)
                         
-                        # Create waterfall plot
-                        waterfall_fig = create_shap_waterfall_plot(
-                            instance_shap,
-                            base_val_scalar,
-                            desc_df_clean.columns.tolist(),
-                            max_display=12
-                        )
-                        st.plotly_chart(waterfall_fig, use_container_width=True)
+                        # Plot SHAP waterfall
+                        st.subheader("Feature Contribution Analysis")
+                        try:
+                            # Try to create SHAP Explanation object first
+                            explanation = shap.Explanation(
+                                values=instance_shap[:10],
+                                base_values=base_val_scalar,
+                                data=desc_df_clean.iloc[0].values[:10],
+                                feature_names=desc_df_clean.columns[:10].tolist()
+                            )
+                            fig, ax = plt.subplots(figsize=(12, 8))
+                            shap.plots.waterfall(explanation, show=False)
+                            st.pyplot(fig)
+                            plt.close()
+                        except Exception as e:
+                            st.warning(f"SHAP waterfall plot failed: {e}. Creating custom waterfall plot...")
+                            
+                            # Fallback to manual waterfall plot
+                            waterfall_fig = create_shap_waterfall_plot(
+                                instance_shap,
+                                base_val_scalar,
+                                desc_df_clean.columns.tolist(),
+                                max_display=12
+                            )
+                            st.plotly_chart(waterfall_fig, use_container_width=True)
                         
                         # Explanation text
                         st.markdown("""
@@ -686,13 +703,28 @@ if predict_button:
                         Each point represents a feature's impact on a prediction.
                         """)
                         
-                        # Create summary plot
-                        summary_fig = create_shap_summary_plot(
-                            shap_vals if len(shap_vals.shape) > 1 else shap_vals.reshape(1, -1),
-                            desc_df_clean.columns.tolist(),
-                            max_display=15
-                        )
-                        st.plotly_chart(summary_fig, use_container_width=True)
+                        try:
+                            # Try to create standard SHAP summary plot
+                            fig, ax = plt.subplots(figsize=(12, 10))
+                            shap.summary_plot(
+                                shap_vals if len(shap_vals.shape) > 1 else shap_vals.reshape(1, -1),
+                                desc_df_clean,
+                                show=False,
+                                max_display=15,
+                                plot_type="dot"
+                            )
+                            st.pyplot(fig)
+                            plt.close()
+                        except Exception as e:
+                            st.warning(f"SHAP summary plot failed: {e}. Creating custom summary plot...")
+                            
+                            # Fallback to custom summary plot
+                            summary_fig = create_shap_summary_plot(
+                                shap_vals if len(shap_vals.shape) > 1 else shap_vals.reshape(1, -1),
+                                desc_df_clean.columns.tolist(),
+                                max_display=15
+                            )
+                            st.plotly_chart(summary_fig, use_container_width=True)
                         
                         st.markdown("""
                         **How to interpret the summary plot:**
@@ -713,7 +745,8 @@ if predict_button:
                     importance_df = pd.DataFrame({
                         'Feature': desc_df_clean.columns,
                         'Importance (Mean |SHAP|)': importance_scores,
-                        'SHAP Value': instance_shap if 'instance_shap' in locals() else shap_vals
+                        'SHAP Value': instance_shap if 'instance_shap' in locals() else shap_vals,
+                        'Descriptor Value': desc_df_clean.iloc[0].values
                     })
                     
                     # Sort by importance
@@ -723,15 +756,44 @@ if predict_button:
                     st.dataframe(
                         importance_df.head(15),
                         use_container_width=True,
-                        height=300
+                        height=300,
+                        column_config={
+                            "Importance (Mean |SHAP|)": st.column_config.NumberColumn(format="%.4f"),
+                            "SHAP Value": st.column_config.NumberColumn(format="%.4f"),
+                            "Descriptor Value": st.column_config.NumberColumn(format="%.4f")
+                        }
                     )
+                    
+                    # Display feature interpretation
+                    with st.expander("**Understanding Feature Contributions**", expanded=False):
+                        st.markdown("""
+                        ### What do these features mean?
+                        
+                        1. **Positive SHAP Value**: When this feature increases, it makes the molecule MORE likely to be an SGLT2 inhibitor
+                        2. **Negative SHAP Value**: When this feature increases, it makes the molecule LESS likely to be an SGLT2 inhibitor
+                        3. **Importance**: How much this feature typically affects predictions across all molecules
+                        4. **Descriptor Value**: The actual calculated value for your molecule
+                        
+                        **Example**: If "nHBAcc_Lipinski" has a positive SHAP value of 0.15, it means that 
+                        having more hydrogen bond acceptors (like oxygen or nitrogen atoms) increases 
+                        the probability of SGLT2 inhibition.
+                        """)
                     
                 else:
                     st.warning("Could not calculate SHAP values for this model.")
                     
             except Exception as e:
                 st.error(f"SHAP analysis failed: {e}")
-                st.info("This might be due to model type limitations or SHAP compatibility issues.")
+                st.info("""
+                This might be due to:
+                - Model type limitations (some models don't support SHAP)
+                - SHAP compatibility issues
+                - Missing dependencies
+                
+                Try using the standard prediction without SHAP interpretation.
+                """)
+    else:
+        st.warning("SHAP library is not available for model interpretation.")
     
     # -------------------- DOWNLOAD RESULTS --------------------
     st.markdown("---")
@@ -744,6 +806,18 @@ if predict_button:
             "probability": prob if prob else "N/A",
             "descriptors": desc_df_clean.iloc[0].to_dict()
         }
+        
+        # Add SHAP values if available
+        if shap and 'shap_vals' in locals() and shap_vals is not None:
+            if len(shap_vals.shape) > 1:
+                shap_array = shap_vals[0]
+            else:
+                shap_array = shap_vals
+            
+            results["shap_values"] = {
+                "base_value": float(base_val) if isinstance(base_val, (int, float, np.number)) else str(base_val),
+                "feature_contributions": dict(zip(desc_df_clean.columns.tolist(), shap_array.tolist()))
+            }
         
         import io
         json_str = json.dumps(results, indent=2)
