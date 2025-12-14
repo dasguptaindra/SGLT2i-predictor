@@ -12,7 +12,7 @@
 
 🧬 **Explainable Predictions - SHAP Waterfall plot to interpret feature contributions**
 
-⚗️ **Useful for Drug Discovery and toxicity related issues**
+⚗️ **Useful for Drug Discovery and polypharmacy related toxicity issues**
 
 🌐 **Accessible Anywhere - Hosted online via Streamlit**
 
