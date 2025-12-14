@@ -13,6 +13,7 @@ from PIL import Image
 from rdkit import Chem
 from rdkit.Chem import Draw, Lipinski, AllChem
 from mordred import Calculator, descriptors
+from mordred.descriptors.atoms import AtomTypeEState
 import shap
 
 # -------- Optional Ketcher --------
@@ -55,31 +56,38 @@ def draw_molecule(smiles):
 
 def calculate_descriptors(smiles):
     """
-    Calculate Mordred descriptors correctly (including MINaaN)
-    using pandas method to avoid 0-value issue.
+    Calculate Mordred descriptors including parameterized MINaaN (AtomTypeEState)
     """
     mol = Chem.MolFromSmiles(smiles)
     mol = Chem.AddHs(mol)
 
-    # ---- Generate 3D conformer (optional but ensures MINaaN works) ----
+    # ---- Generate 3D conformer ----
     AllChem.EmbedMolecule(mol, AllChem.ETKDG())
     AllChem.UFFOptimizeMolecule(mol)
 
-    # ---- Mordred calculator ----
-    calc = Calculator(descriptors, ignore_3D=False)
+    # ---- Create calculator with all model features ----
+    # Separate MINaaN as a parameterized descriptor
+    minaaN_desc = AtomTypeEState('min', 'aaN')
 
-    # ---- Compute descriptors as DataFrame ----
+    # Filter Mordred descriptors excluding MINaaN
+    base_descriptors = []
+    for desc in descriptors:
+        if desc.__name__ != 'AtomTypeEState':
+            base_descriptors.append(desc)
+    calc = Calculator(base_descriptors + [minaaN_desc], ignore_3D=False)
+
+    # ---- Compute descriptors ----
     df = calc.pandas([mol])
     df = df.apply(pd.to_numeric, errors="coerce")
 
-    # ---- Reindex columns to exactly match model features ----
+    # ---- Reindex to match model features ----
     df = df.reindex(columns=model_features)
 
-    # ---- Add Lipinski descriptor if used ----
+    # ---- Add Lipinski descriptor if required ----
     if "nHBAcc_Lipinski" in df.columns:
         df["nHBAcc_Lipinski"] = Lipinski.NumHAcceptors(mol)
 
-    # ---- Handle NaN and infinite values ----
+    # ---- Handle NaN / Inf ----
     df = df.fillna(0)
     df.replace([np.inf, -np.inf], 0, inplace=True)
 
@@ -124,7 +132,7 @@ st.subheader("📊 Results")
 
 desc_df = calculate_descriptors(smiles)
 
-# Optional: display MINaaN value to confirm
+# Optional: display MINaaN value
 if "MINaaN" in desc_df.columns:
     st.write(f"✅ MINaaN descriptor value: {desc_df['MINaaN'].values[0]}")
 
