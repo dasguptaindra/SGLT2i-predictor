@@ -268,21 +268,25 @@ def create_gauge_chart(value, title, color_scheme="RdYlGn"):
 
 def create_shap_waterfall_plot(shap_values, expected_value, feature_names, max_display=10):
     """Create a SHAP waterfall plot."""
+    # Ensure shap_values is a numpy array
+    shap_values = np.array(shap_values).flatten()
+    
     # Get sorted indices by absolute SHAP value
     sorted_idx = np.argsort(np.abs(shap_values))[::-1][:max_display]
     sorted_shap = shap_values[sorted_idx]
     sorted_features = [feature_names[i] for i in sorted_idx]
     
-    # Calculate cumulative values
-    cum_values = np.cumsum(np.insert(sorted_shap, 0, expected_value))
+    # Calculate cumulative values for the waterfall
+    cum_values = np.cumsum(np.insert(sorted_shap, 0, 0))
+    base_value = expected_value
     
     # Colors
     colors = []
     for val in sorted_shap:
         if val >= 0:
-            colors.append('#48bb78')  # Green
+            colors.append('#48bb78')  # Green for positive impact
         else:
-            colors.append('#f56565')  # Red
+            colors.append('#f56565')  # Red for negative impact
     
     fig = go.Figure()
     
@@ -293,15 +297,24 @@ def create_shap_waterfall_plot(shap_values, expected_value, feature_names, max_d
         orientation='h',
         marker_color=colors,
         name='Feature Contribution',
-        hovertemplate='<b>%{y}</b><br>SHAP: %{x:.4f}<extra></extra>'
+        hovertemplate='<b>%{y}</b><br>SHAP Value: %{x:.4f}<br>Impact: %{customdata}<extra></extra>',
+        customdata=[f'{"Increases" if x >= 0 else "Decreases"} activity' for x in sorted_shap]
     ))
     
-    # Add expected value line
-    fig.add_shape(
-        type="line",
-        x0=expected_value, x1=expected_value,
-        y0=-0.5, y1=len(sorted_features)-0.5,
-        line=dict(color="black", width=2, dash="dash")
+    # Add expected value annotation
+    fig.add_annotation(
+        x=base_value,
+        y=len(sorted_features) - 0.5,
+        xref="x",
+        yref="y",
+        text=f"Base Value: {base_value:.4f}",
+        showarrow=True,
+        arrowhead=2,
+        ax=0,
+        ay=-40,
+        bgcolor="white",
+        bordercolor="black",
+        borderwidth=1
     )
     
     fig.update_layout(
@@ -313,10 +326,125 @@ def create_shap_waterfall_plot(shap_values, expected_value, feature_names, max_d
         showlegend=False,
         bargap=0.2,
         yaxis={'categoryorder': 'total ascending'},
-        plot_bgcolor='rgba(240,240,240,0.5)'
+        plot_bgcolor='rgba(240,240,240,0.5)',
+        margin=dict(l=10, r=10, t=50, b=10)
+    )
+    
+    # Add a line at x=0
+    fig.add_shape(
+        type="line",
+        x0=0, x1=0,
+        y0=-0.5, y1=len(sorted_features)-0.5,
+        line=dict(color="black", width=1, dash="dot")
     )
     
     return fig
+
+def create_shap_summary_plot(shap_values, feature_names, max_display=15):
+    """Create a SHAP summary plot (alternative to waterfall)."""
+    # Sort features by mean absolute SHAP value
+    mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
+    sorted_idx = np.argsort(mean_abs_shap)[::-1][:max_display]
+    
+    sorted_shap = shap_values[:, sorted_idx]
+    sorted_features = [feature_names[i] for i in sorted_idx]
+    
+    # Prepare data for plotting
+    data = []
+    for i, feature in enumerate(sorted_features):
+        for val in sorted_shap[:, i]:
+            data.append({
+                'Feature': feature,
+                'SHAP Value': val,
+                'Absolute Value': abs(val)
+            })
+    
+    df = pd.DataFrame(data)
+    
+    # Create beeswarm-like plot
+    fig = px.scatter(
+        df,
+        x='SHAP Value',
+        y='Feature',
+        color='Absolute Value',
+        color_continuous_scale='RdBu_r',
+        title=f"SHAP Summary Plot (Top {max_display} Features)",
+        labels={'SHAP Value': 'SHAP Value (Impact on Prediction)', 'Feature': ''},
+        hover_data={'SHAP Value': ':.4f', 'Absolute Value': ':.4f'},
+        height=500
+    )
+    
+    fig.update_layout(
+        template="plotly_white",
+        showlegend=False,
+        yaxis={'categoryorder': 'total ascending'},
+        plot_bgcolor='rgba(240,240,240,0.5)',
+        margin=dict(l=10, r=10, t=50, b=10)
+    )
+    
+    # Add vertical line at x=0
+    fig.add_shape(
+        type="line",
+        x0=0, x1=0,
+        y0=-0.5, y1=len(sorted_features)-0.5,
+        line=dict(color="black", width=1, dash="dash")
+    )
+    
+    return fig
+
+def get_shap_values_and_base_value(model, X, feature_names):
+    """Get SHAP values and base value for the model."""
+    try:
+        # Create SHAP explainer
+        explainer = shap.Explainer(model, X, feature_names=feature_names)
+        
+        # Calculate SHAP values
+        shap_values = explainer(X)
+        
+        # Extract base value (expected value)
+        base_value = shap_values.base_values
+        
+        # Extract SHAP values
+        shap_vals = shap_values.values
+        
+        # For binary classification with 2D shap values
+        if len(shap_vals.shape) == 3 and shap_vals.shape[2] == 2:
+            # Take SHAP values for class 1 (active)
+            shap_vals = shap_vals[:, :, 1]
+            if isinstance(base_value, (list, np.ndarray)) and len(base_value.shape) > 1:
+                base_value = base_value[:, 1]
+        
+        return shap_vals, base_value
+        
+    except Exception as e:
+        st.warning(f"Using TreeExplainer: {e}")
+        try:
+            # Fallback to TreeExplainer for tree-based models
+            explainer = shap.TreeExplainer(model)
+            
+            # Calculate SHAP values
+            shap_values = explainer.shap_values(X)
+            
+            # Handle different SHAP value formats
+            if isinstance(shap_values, list):
+                # Binary classification returns list of arrays for each class
+                if len(shap_values) == 2:
+                    shap_vals = shap_values[1]  # Class 1 (active)
+                else:
+                    shap_vals = shap_values[0]
+            else:
+                shap_vals = shap_values
+            
+            # Get base value
+            base_value = explainer.expected_value
+            if isinstance(base_value, (list, np.ndarray)) and len(base_value) > 1:
+                base_value = base_value[1]  # For binary classification
+            
+            return shap_vals, base_value
+            
+        except Exception as e2:
+            st.error(f"SHAP calculation failed: {e2}")
+            return None, None
 
 # -------------------- HEADER --------------------
 st.markdown('<div class="main-header">SGLT2 Inhibitor Predictor</div>', unsafe_allow_html=True)
@@ -500,27 +628,110 @@ if predict_button:
         
         with st.spinner("Generating feature explanations..."):
             try:
-                explainer = shap.TreeExplainer(model)
-                shap_values = explainer.shap_values(desc_df_clean)
-                expected_value = explainer.expected_value
-                
-                if isinstance(shap_values, list):
-                    shap_val = shap_values[1] if len(shap_values) == 2 else shap_values[0]
-                    if shap_val.ndim == 2:
-                        shap_val = shap_val[0]
-                    base_value = expected_value[1] if isinstance(expected_value, (list, np.ndarray)) and len(expected_value) > 1 else expected_value
-                else:
-                    shap_val = shap_values.flatten()
-                    base_value = expected_value
-                
-                # Create waterfall plot
-                st.plotly_chart(
-                    create_shap_waterfall_plot(shap_val, base_value, desc_df_clean.columns, max_display=12),
-                    use_container_width=True
+                # Get SHAP values and base value
+                shap_vals, base_val = get_shap_values_and_base_value(
+                    model, 
+                    desc_df_clean, 
+                    desc_df_clean.columns.tolist()
                 )
                 
+                if shap_vals is not None and base_val is not None:
+                    # Create tabs for different SHAP visualizations
+                    tab1, tab2 = st.tabs(["Waterfall Plot", "Summary Plot"])
+                    
+                    with tab1:
+                        # For single prediction, get the SHAP values for this instance
+                        if len(shap_vals.shape) > 1:
+                            instance_shap = shap_vals[0]  # First (and only) instance
+                        else:
+                            instance_shap = shap_vals
+                        
+                        # Ensure base_val is a scalar
+                        if isinstance(base_val, (list, np.ndarray)):
+                            if len(base_val) > 1:
+                                base_val_scalar = base_val[0]
+                            else:
+                                base_val_scalar = float(base_val)
+                        else:
+                            base_val_scalar = float(base_val)
+                        
+                        st.markdown("### SHAP Waterfall Plot")
+                        st.markdown("""
+                        This plot shows how each feature contributes to pushing the prediction 
+                        from the base value (average prediction) to the final prediction.
+                        """)
+                        
+                        # Create waterfall plot
+                        waterfall_fig = create_shap_waterfall_plot(
+                            instance_shap,
+                            base_val_scalar,
+                            desc_df_clean.columns.tolist(),
+                            max_display=12
+                        )
+                        st.plotly_chart(waterfall_fig, use_container_width=True)
+                        
+                        # Explanation text
+                        st.markdown("""
+                        **How to interpret the waterfall plot:**
+                        - **Positive SHAP values (green)**: Increase the probability of being an inhibitor
+                        - **Negative SHAP values (red)**: Decrease the probability
+                        - **Bar length**: Magnitude of the feature's impact
+                        - **Base value**: The model's average prediction across all molecules
+                        """)
+                    
+                    with tab2:
+                        st.markdown("### SHAP Summary Plot")
+                        st.markdown("""
+                        This plot shows the distribution of SHAP values for each feature.
+                        Each point represents a feature's impact on a prediction.
+                        """)
+                        
+                        # Create summary plot
+                        summary_fig = create_shap_summary_plot(
+                            shap_vals if len(shap_vals.shape) > 1 else shap_vals.reshape(1, -1),
+                            desc_df_clean.columns.tolist(),
+                            max_display=15
+                        )
+                        st.plotly_chart(summary_fig, use_container_width=True)
+                        
+                        st.markdown("""
+                        **How to interpret the summary plot:**
+                        - **Color**: Red = high absolute SHAP value, Blue = low
+                        - **Position on x-axis**: Positive = increases activity, Negative = decreases
+                        - **Feature importance**: Features are sorted by their average impact
+                        """)
+                    
+                    # Feature importance table
+                    st.markdown("### **Feature Importance Table**")
+                    
+                    # Calculate feature importance (mean absolute SHAP)
+                    if len(shap_vals.shape) > 1:
+                        importance_scores = np.mean(np.abs(shap_vals), axis=0)
+                    else:
+                        importance_scores = np.abs(shap_vals)
+                    
+                    importance_df = pd.DataFrame({
+                        'Feature': desc_df_clean.columns,
+                        'Importance (Mean |SHAP|)': importance_scores,
+                        'SHAP Value': instance_shap if 'instance_shap' in locals() else shap_vals
+                    })
+                    
+                    # Sort by importance
+                    importance_df = importance_df.sort_values('Importance (Mean |SHAP|)', ascending=False)
+                    
+                    # Display top features
+                    st.dataframe(
+                        importance_df.head(15),
+                        use_container_width=True,
+                        height=300
+                    )
+                    
+                else:
+                    st.warning("Could not calculate SHAP values for this model.")
+                    
             except Exception as e:
                 st.error(f"SHAP analysis failed: {e}")
+                st.info("This might be due to model type limitations or SHAP compatibility issues.")
     
     # -------------------- DOWNLOAD RESULTS --------------------
     st.markdown("---")
