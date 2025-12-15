@@ -1,5 +1,5 @@
 # =========================
-# SGLT2i Predictor
+# SGLT2i Predictor (FINAL & CORRECT)
 # =========================
 
 import json
@@ -51,37 +51,16 @@ model = joblib.load(MODEL_PATH)
 with open(FEATURES_PATH) as f:
     model_features = json.load(f)
 
+# enforce list
+model_features = list(model_features)
+
 
 # ================= INIT MORDED =================
 calc = Calculator(descriptors, ignore_3D=True)
 
-# get full Mordred descriptor list ONCE
-_tmp_mol = Chem.MolFromSmiles("CC")
-MORDRED_NAMES = list(calc(_tmp_mol).keys())
-
-
-# ================= STRICT DESCRIPTOR MAP =================
-# JSON feature name  -> EXACT Mordred descriptor name
-DESCRIPTOR_MAP = {
-    "MINaaN": "MINaaN",
-    "MAXaaN": "MAXaaN",
-    "NaaN": "NaaN",
-    "MAXsCl": "MAXsCl",
-
-    "nN": "nN",
-    "nFARing": "nFARing",
-    "nFAHRing": "nFAHRing",
-    "naHRing": "naHRing",
-
-    "BCUTs-1h": "BCUTs-1h",
-    "ATSC2c": "ATSC2c",
-    "MATS2c": "MATS2c",
-    "MDEC-33": "MDEC-33",
-}
-
 
 # ================= HELPER FUNCTIONS =================
-def validate_smiles(smiles):
+def validate_smiles(smiles: str) -> bool:
     return Chem.MolFromSmiles(smiles) is not None
 
 
@@ -92,46 +71,47 @@ def draw_molecule(smiles):
 
 def calculate_descriptors(smiles: str) -> pd.DataFrame:
     """
-    Correct descriptor pipeline:
+    CORRECT DESCRIPTOR PIPELINE:
     1. Calculate ALL Mordred descriptors
     2. Calculate RDKit-only descriptors
-    3. Extract ONLY model-required features
+    3. EXACT name matching with model_features.json
+    4. Preserve feature order
     """
+
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError("Invalid SMILES")
 
-    # -------- 1. Mordred descriptors --------
+    # -------- 1. Calculate ALL Mordred descriptors --------
     mordred_result = calc(mol)
 
     mordred_dict = {}
-    for name in MORDRED_NAMES:
+    for desc_name, value in mordred_result.items():
         try:
-            value = mordred_result[name]
-            mordred_dict[name] = float(value) if value is not None else 0.0
+            mordred_dict[str(desc_name)] = float(value)
         except:
-            mordred_dict[name] = 0.0
+            mordred_dict[str(desc_name)] = 0.0
 
     # -------- 2. RDKit descriptors --------
     rdkit_dict = {
-        "nHBAcc_Lipinski": float(Lipinski.NumHAcceptors(mol))
+        "nHBAcc_Lipinski": float(Lipinski.NumHAcceptors(mol)),
     }
 
-    # -------- 3. Build model input --------
-    final_features = {}
+    # -------- 3. Build FINAL model input --------
+    final_data = {}
 
     for feature in model_features:
-        if feature in rdkit_dict:
-            final_features[feature] = rdkit_dict[feature]
+        if feature in mordred_dict:
+            final_data[feature] = mordred_dict[feature]
 
-        elif feature in DESCRIPTOR_MAP:
-            mordred_name = DESCRIPTOR_MAP[feature]
-            final_features[feature] = mordred_dict.get(mordred_name, 0.0)
+        elif feature in rdkit_dict:
+            final_data[feature] = rdkit_dict[feature]
 
         else:
-            final_features[feature] = 0.0
+            # feature used during training but not calculable now
+            final_data[feature] = 0.0
 
-    df = pd.DataFrame([final_features])
+    df = pd.DataFrame([final_data])
     df = df.replace([np.inf, -np.inf, np.nan], 0.0)
 
     return df
@@ -143,7 +123,8 @@ st.title("SGLT2i Predictor v1.0")
 with st.expander("What is SGLT2i Predictor?", expanded=True):
     st.write(
         "**SGLT2i Predictor** predicts SGLT2 inhibitory activity of drug-like molecules "
-        "using a Gradient Boosting model with SHAP-based interpretation."
+        "using a Gradient Boosting classifier with **Mordred + RDKit descriptors** "
+        "and **SHAP-based interpretability**."
     )
 
 
@@ -152,10 +133,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("✏️ Draw Molecule")
-    if KETCHER_AVAILABLE:
-        smiles_drawn = st_ketcher()
-    else:
-        smiles_drawn = ""
+    smiles_drawn = st_ketcher() if KETCHER_AVAILABLE else ""
 
 with col2:
     st.subheader("🧬 SMILES Input")
@@ -171,11 +149,11 @@ if not smiles:
     st.stop()
 
 if not validate_smiles(smiles):
-    st.error("Invalid SMILES")
+    st.error("❌ Invalid SMILES string")
     st.stop()
 
 
-# ================= RESULTS =================
+# ================= PREDICTION =================
 st.markdown("---")
 st.subheader("📊 Prediction Results")
 
@@ -187,6 +165,7 @@ try:
 
     col1, col2 = st.columns(2)
 
+    # -------- Left panel --------
     with col1:
         img = draw_molecule(smiles)
         if img:
@@ -197,10 +176,11 @@ try:
         else:
             st.error("🔴 INACTIVE – Non-Inhibitor")
 
-        st.metric("Confidence Score", f"{prob:.2%}")
+        st.metric("Prediction Probability", f"{prob:.2%}")
 
+    # -------- SHAP --------
     with col2:
-        st.subheader("📈 SHAP Interpretation")
+        st.subheader("📈 SHAP Feature Contribution")
 
         explainer = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(desc_df)
@@ -225,27 +205,27 @@ try:
         plt.close()
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"❌ Error during prediction: {e}")
     st.stop()
 
 
-# ================= DESCRIPTORS =================
-with st.expander("🔬 Calculated Descriptors"):
+# ================= DESCRIPTOR TABLE =================
+with st.expander("🔬 Model Input Descriptors"):
     st.dataframe(desc_df.T.rename(columns={0: "Value"}), use_container_width=True)
 
 
 # ================= SIDEBAR =================
 with st.sidebar:
-    st.header("ℹ️ Model Information")
+    st.header("ℹ️ Model Details")
     st.write("""
     **Algorithm:** Gradient Boosting  
-    **Descriptors:** Mordred + RDKit  
-    **Key AtomTypeEState:** MINaaN, MAXaaN  
-    **Interpretability:** SHAP  
+    **Descriptor Space:** Mordred (2D) + RDKit  
+    **Feature Selection:** Training feature list  
+    **Interpretability:** SHAP TreeExplainer  
     """)
 
     st.info(
-        "💡 Try Dapagliflozin:\n"
+        "💡 Example (Dapagliflozin):\n"
         "CCCCCC1=CC(=C(C(=C1)C2C(C(C(O2)CO)O)O)"
         "OC3C(C(C(C(O3)CO)O)O)O)O)"
     )
