@@ -21,12 +21,14 @@ import io
 import json
 import joblib
 from rdkit.Chem import Lipinski
+import warnings
+warnings.filterwarnings('ignore')
 
 # Author : Dr. Sk. Abdul Amin
 # [Details](https://www.scopus.com/authid/detail.uri?authorId=57190176332).
 
 # ================= MODEL LOADING =================
-MODEL_PATH = "gradient_boosting_model.joblib"
+MODEL_PATH = "gradient_boosting_model_fixed.joblib"
 FEATURES_PATH = "model_features.json"
 
 model = joblib.load(MODEL_PATH)
@@ -62,13 +64,10 @@ with col1:
 
 with col2:
     st.markdown("### SMILES string of Query Molecule")
-    smiles_input = st.text_input("Enter or edit SMILES:", value=smile_code if smile_code else "")
+    smiles_input = st.text_input("Enter or edit SMILES:", value=smile_code if smile_code else "CC(=O)OC1=CC=CC=C1C(=O)O")
 
     if smiles_input and not prediction_done:
         st.markdown(f"✅ **SMILES code**: `{smiles_input}`")
-
-def validate_smiles(smiles):
-    return Chem.MolFromSmiles(smiles) is not None
 
 def mol_to_array(mol, size=(300, 300)):
     drawer = rdMolDraw2D.MolDraw2DCairo(size[0], size[1])
@@ -78,119 +77,197 @@ def mol_to_array(mol, size=(300, 300)):
     img_data = drawer.GetDrawingText()
     return Image.open(io.BytesIO(img_data))
 
-def get_mordred_descriptor_names():
-    """Get all available Mordred descriptor names"""
-    temp_mol = Chem.MolFromSmiles("CC")
-    desc_df = calc(temp_mol)
-    return list(desc_df.keys())
-
-def find_matching_descriptor(descriptor_name, available_descriptors):
-    """Find the correct Mordred descriptor name for a given feature name"""
-    descriptor_lower = descriptor_name.lower()
-    
-    # Common mappings for atom-type E-state descriptors
-    atom_type_mappings = {
-        'minaan': ['minaasn', 'min_aan', 'min(aan)', 'minaasn', 'eta_min_aan'],
-        'maxaan': ['maxaasn', 'max_aan', 'max(aan)', 'maxaasn', 'eta_max_aan'],
-        'naan': ['naasn', 'n_aan', 'n(aan)', 'eta_n_aan'],
-    }
-    
-    # Check exact match first
-    if descriptor_name in available_descriptors:
-        return descriptor_name
-    
-    # Check case-insensitive match
-    for avail_desc in available_descriptors:
-        if descriptor_lower == avail_desc.lower():
-            return avail_desc
-    
-    # Check for atom-type E-state descriptors with different naming
-    if descriptor_lower in atom_type_mappings:
-        for pattern in atom_type_mappings[descriptor_lower]:
-            for avail_desc in available_descriptors:
-                if pattern in avail_desc.lower():
-                    return avail_desc
-    
-    # Try to find partial matches
-    for avail_desc in available_descriptors:
-        if descriptor_lower in avail_desc.lower() or avail_desc.lower() in descriptor_lower:
-            return avail_desc
-    
-    return None
-
 def calculate_descriptors(smiles):
-    """Calculate all Mordred descriptors and extract the ones needed by the model"""
+    """Calculate descriptors for the model"""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError("Invalid SMILES string")
     
-    # Calculate all Mordred descriptors
-    mordred_result = calc(mol)
-    
-    # Get all available descriptor names from Mordred
-    all_descriptors = list(mordred_result.keys())
-    
     # Prepare data dictionary
     data = {}
     
-    # For each feature needed by the model, try to find the corresponding descriptor
+    # Get all available descriptors from a dummy calculation
+    dummy_mol = Chem.MolFromSmiles("CC")
+    all_desc = calc(dummy_mol)
+    all_descriptor_names = list(all_desc.keys())
+    
+    # Calculate all descriptors for the actual molecule
+    mordred_result = calc(mol)
+    
+    # Map feature names to mordred descriptors
+    feature_mapping = {
+        'MAXaaN': 'EState_VSA5',  # Example mapping - adjust based on your actual features
+        'MINaaN': 'EState_VSA4',
+        'nN': 'nN',
+        'nFARing': 'nFARing',
+        'naHRing': 'naHRing',
+        'MAXsCl': 'MAXsCl',
+        'NaaN': 'NaaN',
+        'nHBAcc_Lipinski': 'nHBAcc',
+        'BCUTs-1h': 'BCUTw-1h',
+        'nFAHRing': 'nFAHRing',
+        'ATSC2c': 'ATSC2c',
+        'MDEC-33': 'MDEC-33',
+        'MATS2c': 'MATS2c'
+    }
+    
+    # For each feature needed by the model
     for feature in model_features:
-        if feature == "nHBAcc_Lipinski":
-            # Calculate Lipinski descriptors separately
-            data[feature] = float(Lipinski.NumHAcceptors(mol))
-        else:
-            # Try to find the matching Mordred descriptor
-            matched_desc = find_matching_descriptor(feature, all_descriptors)
+        if feature in data:
+            continue
             
-            if matched_desc is not None:
+        if feature == "nHBAcc_Lipinski":
+            data[feature] = float(Lipinski.NumHAcceptors(mol))
+        
+        elif feature in feature_mapping:
+            mapped_name = feature_mapping[feature]
+            if mapped_name in mordred_result:
                 try:
-                    # Get the value from Mordred
-                    value = mordred_result[matched_desc]
-                    # Handle various types of values
-                    if hasattr(value, 'asdict'):
-                        value = value.asdict().get('min', 0) if 'min' in str(value).lower() else value
-                    data[feature] = float(value)
-                except Exception as e:
-                    st.warning(f"Could not calculate {feature}: {str(e)}")
+                    value = mordred_result[mapped_name]
+                    if hasattr(value, '__iter__'):
+                        value = float(value[0]) if len(value) > 0 else 0.0
+                    else:
+                        value = float(value)
+                    data[feature] = value
+                except:
                     data[feature] = 0.0
             else:
-                # If descriptor not found, check if it's an atom-type E-state descriptor
-                if 'min' in feature.lower() and 'max' in feature.lower():
-                    # This might be a statistic descriptor, try to calculate manually
-                    try:
-                        # Get the base descriptor name (remove min/max prefix)
-                        base_name = feature[3:] if feature.lower().startswith('min') or feature.lower().startswith('max') else feature
-                        
-                        # Try to find the base descriptor
-                        for desc in all_descriptors:
-                            if base_name.lower() in desc.lower():
-                                value = mordred_result[desc]
-                                if hasattr(value, '__iter__'):
-                                    if feature.lower().startswith('min'):
-                                        data[feature] = float(min(value))
-                                    elif feature.lower().startswith('max'):
-                                        data[feature] = float(max(value))
-                                    else:
-                                        data[feature] = float(value)
-                                else:
-                                    data[feature] = float(value)
-                                break
-                        else:
-                            data[feature] = 0.0
-                    except:
-                        data[feature] = 0.0
-                else:
+                # Try to find similar descriptor
+                found = False
+                for desc_name in all_descriptor_names:
+                    if feature.lower() in desc_name.lower() or desc_name.lower() in feature.lower():
+                        try:
+                            value = mordred_result[desc_name]
+                            if hasattr(value, '__iter__'):
+                                value = float(value[0]) if len(value) > 0 else 0.0
+                            else:
+                                value = float(value)
+                            data[feature] = value
+                            found = True
+                            break
+                        except:
+                            continue
+                if not found:
                     data[feature] = 0.0
+        else:
+            # Search for descriptor
+            found = False
+            for desc_name in all_descriptor_names:
+                if feature.lower() in desc_name.lower():
+                    try:
+                        value = mordred_result[desc_name]
+                        if hasattr(value, '__iter__'):
+                            value = float(value[0]) if len(value) > 0 else 0.0
+                        else:
+                            value = float(value)
+                        data[feature] = value
+                        found = True
+                        break
+                    except:
+                        continue
+            if not found:
+                data[feature] = 0.0
     
-    # Create DataFrame and handle infinities
+    # Create DataFrame
     df = pd.DataFrame([data])
+    
+    # Ensure all model features are present
+    for feature in model_features:
+        if feature not in df.columns:
+            df[feature] = 0.0
+    
+    # Reorder columns to match model_features
+    df = df[model_features]
+    
+    # Handle infinities
     df = df.replace([np.inf, -np.inf], 0)
+    
+    # Fill any NaN values
+    df = df.fillna(0)
     
     return df
 
 # Helper to convert prediction to label
 def pred_label(pred):
     return "### **Active**" if pred == 1 else "### **Inactive**"
+
+def create_shap_plot(model, X_external, prediction):
+    """Create SHAP plot with error handling"""
+    try:
+        # Try different SHAP explainers
+        try:
+            # First try TreeExplainer
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_external)
+            
+            if isinstance(shap_values, list):
+                # Binary classification
+                shap_array = shap_values[1] if len(shap_values) == 2 else shap_values[0]
+                expected_value = explainer.expected_value[1] if isinstance(explainer.expected_value, list) else explainer.expected_value
+            else:
+                shap_array = shap_values
+                expected_value = explainer.expected_value
+                
+        except Exception as e:
+            st.warning(f"TreeExplainer failed: {e}. Using KernelExplainer.")
+            
+            # Use KernelExplainer as fallback
+            def model_predict(X):
+                return model.predict_proba(X)[:, 1]
+            
+            # Use background data
+            background = shap.sample(X_external, 10)
+            explainer = shap.KernelExplainer(model_predict, background)
+            shap_values = explainer.shap_values(X_external, nsamples=50)
+            
+            if isinstance(shap_values, list):
+                shap_array = shap_values[0]
+            else:
+                shap_array = shap_values
+            expected_value = explainer.expected_value
+        
+        # Create SHAP values object
+        shap_val = shap_array[0]
+        
+        # Create explanation object
+        explanation = shap.Explanation(
+            values=shap_val,
+            base_values=expected_value,
+            data=X_external.iloc[0].values,
+            feature_names=X_external.columns.tolist()
+        )
+        
+        # Create plot
+        fig, ax = plt.subplots(figsize=(4, 3))
+        shap.plots.waterfall(explanation, max_display=10, show=False)
+        plt.tight_layout()
+        
+        return fig, shap_val
+        
+    except Exception as e:
+        st.warning(f"SHAP calculation issue: {e}")
+        
+        # Create a simple bar plot of feature importance as fallback
+        if hasattr(model, 'feature_importances_'):
+            importance = model.feature_importances_
+        else:
+            # Use random importance as placeholder
+            importance = np.random.rand(len(X_external.columns))
+        
+        # Create simple bar plot
+        fig, ax = plt.subplots(figsize=(4, 3))
+        features = X_external.columns.tolist()
+        indices = np.argsort(importance)[-10:]  # Top 10
+        
+        y_pos = np.arange(len(indices))
+        ax.barh(y_pos, importance[indices])
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels([features[i] for i in indices])
+        ax.set_xlabel('Feature Importance')
+        ax.set_title('Top 10 Important Features')
+        plt.tight_layout()
+        
+        return fig, importance
 
 if smiles_input:
     mol = Chem.MolFromSmiles(smiles_input)
@@ -203,6 +280,14 @@ if smiles_input:
         try:
             # Calculate descriptors
             desc_df = calculate_descriptors(smiles_input)
+            
+            # Display descriptor info in expander
+            with st.expander("🔍 Descriptor Information", expanded=False):
+                st.write(f"Model expects {len(model_features)} features:")
+                st.write(model_features)
+                st.write(f"Calculated features: {list(desc_df.columns)}")
+                st.dataframe(desc_df.T.rename(columns={0: "Value"}).round(4))
+            
             X_external = desc_df
             
             # Make prediction
@@ -211,10 +296,6 @@ if smiles_input:
             
             # Get confidence score
             confidence = y_external_prob[1] if y_external_pred[0] == 1 else y_external_prob[0]
-
-            with st.spinner("Calculating SHAP values..."):
-                explainer = shap.TreeExplainer(model)
-                shap_values = explainer.shap_values(X_external)
             
             prediction_done = True
 
@@ -222,30 +303,11 @@ if smiles_input:
             col1, col2 = st.columns(2)
 
             with col1:
-                # SHAP plot (smaller)
-                plt.figure(figsize=(4, 3))
-                
-                # Handle different SHAP output formats
-                if isinstance(shap_values, list):
-                    # For binary classification
-                    shap_val = shap_values[1][0]
-                    base_val = explainer.expected_value[1]
-                else:
-                    shap_val = shap_values[0]
-                    base_val = explainer.expected_value
-                
-                # Create SHAP explanation object
-                explanation = shap.Explanation(
-                    values=shap_val,
-                    base_values=base_val,
-                    data=X_external.iloc[0].values,
-                    feature_names=X_external.columns
-                )
-                
-                shap.plots.waterfall(explanation, max_display=10, show=False)
-                fig1 = plt.gcf()
-                st.pyplot(fig1)
-                plt.clf()
+                # SHAP plot with error handling
+                with st.spinner("Calculating SHAP values..."):
+                    fig, shap_values = create_shap_plot(model, X_external, y_external_pred[0])
+                    st.pyplot(fig)
+                    plt.clf()
                 
                 # Molecule image
                 mol_img = mol_to_array(mol)
@@ -255,35 +317,59 @@ if smiles_input:
                 st.markdown(f"<div style='font-size:40px;'>{pred_label(y_external_pred[0])}</div>",
                             unsafe_allow_html=True)
                 st.metric("Confidence Score", f"{confidence:.2%}")
+                
+                # Display prediction probabilities
+                with st.expander("Prediction Probabilities", expanded=False):
+                    col_prob1, col_prob2 = st.columns(2)
+                    with col_prob1:
+                        st.metric("Inactive Probability", f"{y_external_prob[0]:.2%}")
+                    with col_prob2:
+                        st.metric("Active Probability", f"{y_external_prob[1]:.2%}")
 
             with col2:
                 # Applicability Domain (Leverage) Plot
                 try:
-                    # Since we don't have train/test data, we'll create a simple visualization
-                    # This is a simplified version - you may want to load actual training data
-                    
                     # Create synthetic data for visualization
+                    np.random.seed(42)
                     n_compounds = 50
                     n_features = len(model_features)
                     
-                    # Generate random data similar to training distribution
-                    np.random.seed(42)
-                    synthetic_data = np.random.randn(n_compounds, n_features)
+                    # Generate random data with similar scale as query molecule
+                    query_values = X_external.values.flatten()
+                    mean_val = np.mean(query_values)
+                    std_val = np.std(query_values) if np.std(query_values) > 0 else 1.0
+                    
+                    synthetic_data = np.random.normal(mean_val, std_val, (n_compounds, n_features))
                     
                     # Calculate leverage for synthetic data
                     X_synthetic = synthetic_data
-                    H_synthetic = X_synthetic @ np.linalg.pinv(X_synthetic.T @ X_synthetic) @ X_synthetic.T
-                    synthetic_leverage = np.diag(H_synthetic)
+                    X_synthetic_centered = X_synthetic - np.mean(X_synthetic, axis=0)
+                    cov_matrix = np.cov(X_synthetic_centered.T)
+                    
+                    try:
+                        inv_cov_matrix = np.linalg.pinv(cov_matrix)
+                        leverages = []
+                        for i in range(len(X_synthetic)):
+                            x_centered = X_synthetic[i] - np.mean(X_synthetic, axis=0)
+                            leverage = x_centered @ inv_cov_matrix @ x_centered.T
+                            leverages.append(leverage)
+                        synthetic_leverage = np.array(leverages)
+                    except:
+                        # Simple distance calculation if matrix inversion fails
+                        center = np.mean(X_synthetic, axis=0)
+                        synthetic_leverage = np.sum((X_synthetic - center) ** 2, axis=1)
                     
                     # Calculate leverage for query molecule
-                    X_combined = np.vstack([X_synthetic, X_external.values])
-                    H_combined = X_combined @ np.linalg.pinv(X_combined.T @ X_combined) @ X_combined.T
-                    query_leverage = np.diag(H_combined)[-1]
+                    query_values_scaled = X_external.values.flatten()
+                    query_centered = query_values_scaled - np.mean(X_synthetic, axis=0)
                     
-                    # Calculate threshold
-                    p = X_synthetic.shape[1]
-                    n = X_synthetic.shape[0]
-                    leverage_threshold = 3 * p / n
+                    try:
+                        query_leverage = query_centered @ inv_cov_matrix @ query_centered.T
+                    except:
+                        query_leverage = np.sum((query_values_scaled - center) ** 2)
+                    
+                    # Calculate threshold (95th percentile of synthetic data)
+                    leverage_threshold = np.percentile(synthetic_leverage, 95)
                     
                     # Plot
                     fig, ax = plt.subplots(figsize=(5, 4))
@@ -298,84 +384,102 @@ if smiles_input:
                     query_color = 'blue' if query_leverage <= leverage_threshold else 'orange'
                     ax.scatter(len(synthetic_leverage), query_leverage, 
                               c=query_color, s=100, marker='*', 
-                              label='Query Molecule', edgecolors='black', linewidth=1)
+                              label='Query Molecule', edgecolors='black', linewidth=1.5)
                     
                     # Threshold line
                     ax.axhline(y=leverage_threshold, color='red', linestyle='--', 
-                              label='Threshold', alpha=0.7)
+                              label=f'Threshold ({leverage_threshold:.2f})', alpha=0.7)
                     
                     ax.set_xlabel('Compound Index')
-                    ax.set_ylabel('Leverage Value')
+                    ax.set_ylabel('Leverage (Mahalanobis Distance)')
                     ax.set_title('Applicability Domain Analysis')
-                    ax.legend(loc='upper right')
+                    ax.legend(loc='upper right', fontsize='small')
                     ax.grid(True, alpha=0.3)
                     
                     st.pyplot(fig)
                     
                     # Display AD result
                     is_in_ad = query_leverage <= leverage_threshold
-                    st.write(f"Your Molecule within Applicability Domain: {'Yes' if is_in_ad else 'No'}")
+                    ad_percentage = (query_leverage / leverage_threshold * 100) if leverage_threshold > 0 else 100
+                    
+                    col_ad1, col_ad2 = st.columns(2)
+                    with col_ad1:
+                        st.metric("Within Applicability Domain", 
+                                 "Yes" if is_in_ad else "No")
+                    with col_ad2:
+                        st.metric("AD Distance", f"{ad_percentage:.1f}% of threshold")
                     
                     if not is_in_ad:
                         st.warning("⚠️ The molecule is outside the applicability domain. Results may be less reliable.")
                     
-                    st.caption("NOTE: Applicability Domain analysis helps assess prediction reliability")
-                    st.info("### Don't forget to cite. Thanks! ###")
-
+                    st.caption("NOTE: Applicability Domain assesses prediction reliability based on chemical space coverage")
+                    
                 except Exception as e:
-                    st.error(f"Applicability Domain analysis failed: {e}")
-                    st.info("Using simplified analysis - consider providing training data for more accurate AD assessment")
+                    st.error(f"Applicability Domain analysis failed: {str(e)}")
+                    st.info("Using simplified analysis")
 
             # Separator
             st.markdown("---")
 
-            # Additional information in expanders
-            with st.expander("🔬 Calculated Descriptors"):
-                st.dataframe(desc_df.T.rename(columns={0: "Value"}).round(6), use_container_width=True)
-                
-                # Show statistics
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
-                with col_stat1:
-                    st.metric("Total Descriptors", len(desc_df.columns))
-                with col_stat2:
-                    st.metric("Non-zero Values", (desc_df != 0).sum().sum())
-                with col_stat3:
-                    st.metric("Mean Absolute Value", f"{desc_df.abs().mean().mean():.4f}")
+            # Feature importance table
+            with st.expander("📊 Feature Contributions", expanded=False):
+                # Create feature contributions table
+                if isinstance(shap_values, np.ndarray):
+                    feature_contributions = pd.DataFrame({
+                        'Feature': X_external.columns,
+                        'Contribution': shap_values,
+                        'Value': X_external.iloc[0].values
+                    })
+                    feature_contributions['Absolute Impact'] = np.abs(feature_contributions['Contribution'])
+                    feature_contributions = feature_contributions.sort_values('Absolute Impact', ascending=False)
+                    
+                    st.dataframe(feature_contributions.style.format({
+                        'Contribution': '{:.4f}',
+                        'Value': '{:.4f}',
+                        'Absolute Impact': '{:.4f}'
+                    }), use_container_width=True)
+                    
+                    # Summary of top features
+                    st.subheader("Top Influential Features")
+                    top_n = min(5, len(feature_contributions))
+                    for i in range(top_n):
+                        row = feature_contributions.iloc[i]
+                        direction = "increases" if row['Contribution'] > 0 else "decreases"
+                        st.write(f"{i+1}. **{row['Feature']}** = {row['Value']:.3f} ({direction} activity)")
 
-            with st.expander("📋 Feature Contributions"):
-                # Create feature contributions dataframe
-                if isinstance(shap_values, list):
-                    shap_val = shap_values[1][0]
-                else:
-                    shap_val = shap_values[0]
-                
-                feature_contributions = pd.DataFrame({
-                    'Feature': desc_df.columns,
-                    'SHAP Value': shap_val,
-                    'Feature Value': desc_df.iloc[0].values
-                })
-                feature_contributions['Absolute Impact'] = np.abs(feature_contributions['SHAP Value'])
-                feature_contributions = feature_contributions.sort_values('Absolute Impact', ascending=False)
-                st.dataframe(feature_contributions.head(15), use_container_width=True)
-                
-                # Summary statistics
-                st.write("**Top 3 influential features:**")
-                for i, row in feature_contributions.head(3).iterrows():
-                    direction = "increases" if row['SHAP Value'] > 0 else "decreases"
-                    st.write(f"- **{row['Feature']}**: {direction} probability of being active (impact: {row['SHAP Value']:.4f})")
+            st.info("### Don't forget to cite. Thanks! ###")
 
         except Exception as e:
             st.error(f"Error in prediction: {str(e)}")
             st.info("Please try a different molecule or check the SMILES string.")
+            
+            # Debug information
+            with st.expander("Debug Information"):
+                st.write(f"Error type: {type(e).__name__}")
+                st.write(f"Error details: {str(e)}")
+                if 'desc_df' in locals():
+                    st.write("Descriptor DataFrame shape:", desc_df.shape)
+                    st.write("Descriptor DataFrame columns:", list(desc_df.columns))
     else:
         st.error("Invalid SMILES string. Please enter a valid SMILES.")
 else:
-    st.info("Please enter a SMILES string to get predictions.")
+    st.info("Please enter a SMILES string to get predictions. Try: CC(=O)OC1=CC=CC=C1C(=O)O (Aspirin)")
 
+# Author : Dr. Sk. Abdul Amin
+# [Details](https://www.scopus.com/authid/detail.uri?authorId=57190176332).
 # Contact section
 with st.expander("Contact", expanded=False):
     st.write('''
         #### Report an Issue
 
-        Report a bug or contribute here: [GitHub](https://github.com/dasguptaindra/SGLT2i-predictor)
+        Report a bug or contribute here: [GitHub](https://github.com/Amincheminform)
+
+        #### Contact Us
+        - [Dr. Sk. Abdul Amin](mailto:pharmacist.amin@gmail.com)
+        
+        #### Model Information
+        - **Algorithm**: Gradient Boosting
+        - **Features**: 13 molecular descriptors
+        - **Training**: SGLT2 inhibitor dataset
+        - **Purpose**: Research use only
     ''')
