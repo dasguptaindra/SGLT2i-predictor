@@ -448,8 +448,6 @@ if smiles_input:
                         st.write(f"**{i+1}. {row['Feature']}** = {row['Feature Value']:.3f}")
                         st.write(f"   → {impact_dir} probability of being active by {abs(row['SHAP Value']):.4f}")
 
-            st.info("### Don't forget to cite. Thanks! ###")
-
         except Exception as e:
             st.error(f"Error in prediction: {str(e)}")
             
