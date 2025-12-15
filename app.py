@@ -320,6 +320,10 @@ if smiles_input:
                     st.metric("Confidence Score", f"{confidence:.2%}")
                 with col_conf2:
                     st.metric("Prediction", "🟢 ACTIVE" if y_external_pred == 1 else "🔴 INACTIVE")
+        
+        except Exception as e:
+            st.error(f"Error during prediction: {str(e)}")
+            st.info("Please check if the SMILES string is valid and try again.")
 
 # Contact section
 with st.expander("Contact & Information", expanded=False):
