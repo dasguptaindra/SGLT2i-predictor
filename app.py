@@ -37,38 +37,14 @@ except FileNotFoundError as e:
     exit()
 
 # =====================================================
-# DESCRIPTOR MATCHING LOGIC (CORE FIX)
+# DESCRIPTOR NAME MAPPING
 # =====================================================
-def find_matching_descriptor(mordred_keys, target_name):
-    """
-    Find the best matching descriptor name from Mordred keys.
-    Handles case variations, underscores, and partial matches.
-    """
-    target_lower = target_name.lower().replace('-', '').replace('_', '').replace(' ', '')
-    
-    # 1. Exact match (case-insensitive)
-    for mordred_key in mordred_keys:
-        if str(mordred_key).lower() == target_name.lower():
-            return str(mordred_key)
-    
-    # 2. Match without special characters
-    for mordred_key in mordred_keys:
-        mordred_clean = str(mordred_key).lower().replace('-', '').replace('_', '').replace(' ', '')
-        if mordred_clean == target_lower:
-            return str(mordred_key)
-    
-    # 3. Substring match
-    for mordred_key in mordred_keys:
-        if target_name.lower() in str(mordred_key).lower():
-            return str(mordred_key)
-    
-    # 4. Partial pattern match (e.g., for MINaaN -> MinAaN)
-    for mordred_key in mordred_keys:
-        mordred_lower = str(mordred_key).lower()
-        if any(part in mordred_lower for part in target_lower.split('_')):
-            return str(mordred_key)
-    
-    return None
+DESCRIPTOR_NAME_MAP = {
+    "MINaaN": "MINaaN",
+    "MAXaaN": "MAXaaN",
+    "BCUTs-1h": "BCUTs-1h",
+    "nHBAcc_Lipinski": "nHBAcc",
+}
 
 # =====================================================
 # DESCRIPTOR CALCULATION
@@ -79,10 +55,10 @@ def calculate_descriptors_from_smiles(smiles: str) -> pd.DataFrame:
     if mol is None:
         raise ValueError("Invalid SMILES string")
 
-    # Add hydrogens for accurate 2D/3D descriptor calculation
+    # Add hydrogens for better descriptor calculation
     mol = Chem.AddHs(mol)
     
-    # Calculate all Mordred descriptors (ignore_3D=True for speed/robustness)
+    # Calculate all Mordred descriptors
     calc = Calculator(descriptors, ignore_3D=True)
     desc_series = calc(mol)
     
@@ -101,119 +77,77 @@ def calculate_descriptors_from_smiles(smiles: str) -> pd.DataFrame:
     return pd.DataFrame([desc_dict])
 
 # =====================================================
-# FEATURE EXTRACTION (ROBUST)
+# FEATURE EXTRACTION
 # =====================================================
 def extract_features(desc_df, required_features):
-    """
-    Extract required features from Mordred descriptors using fuzzy pattern matching.
-    Returns: DataFrame (X), Dictionary (mapping)
-    """
+    """Extract required features from Mordred descriptors."""
     X = pd.DataFrame(0.0, index=[0], columns=required_features)
     available_columns = [str(c) for c in desc_df.columns]
     
-    print(f"\n📊 Available Mordred descriptors: {len(available_columns)}")
-    print(f"🔍 Looking for {len(required_features)} required features...")
-    
-    feature_mapping = {}
-    
     for feat in required_features:
-        # Step 1: Try dynamic matching
-        matched_name = find_matching_descriptor(available_columns, feat)
+        # Use mapped name if available, otherwise use original
+        mordred_name = DESCRIPTOR_NAME_MAP.get(feat, feat)
         
-        if matched_name:
-            feature_mapping[feat] = matched_name
-            val = desc_df.at[0, matched_name]
-            
+        if mordred_name in available_columns:
+            val = desc_df.at[0, mordred_name]
             if pd.notna(val) and val not in [np.inf, -np.inf]:
                 X.at[0, feat] = float(val)
             else:
-                X.at[0, feat] = 0.0  # Default for NaN/inf
+                X.at[0, feat] = 0.0  # Default for NaN/inf values
         else:
-            # Step 2: Check hardcoded variations for known tricky descriptors
-            common_variations = {
-                'MINaaN': ['MinAaN', 'minaann', 'MinAaN'],
-                'MAXaaN': ['MaxAaN', 'maxaann', 'MaxAaN'],
-                'nHBAcc_Lipinski': ['nHBAcc', 'nhbacc', 'nHBAcc2'],
-                'BCUTs-1h': ['BCUTw-1h', 'BCUTc-1h', 'BCUTp-1h', 'bcut'],
-            }
-            
-            found_variant = None
-            if feat in common_variations:
-                for variant in common_variations[feat]:
-                    if variant in available_columns:
-                        found_variant = variant
-                        break
-            
-            if found_variant:
-                feature_mapping[feat] = found_variant
-                val = desc_df.at[0, found_variant]
+            # Try direct match with original name
+            if feat in available_columns:
+                val = desc_df.at[0, feat]
                 if pd.notna(val) and val not in [np.inf, -np.inf]:
                     X.at[0, feat] = float(val)
-                    print(f"🔄 Using variant: '{feat}' -> '{found_variant}'")
                 else:
                     X.at[0, feat] = 0.0
             else:
-                # Step 3: Desperate partial match
-                for col in available_columns:
-                    clean_feat = feat.lower().replace('-', '').replace('_', '')
-                    clean_col = col.lower().replace('-', '').replace('_', '')
-                    if clean_feat in clean_col:
-                        feature_mapping[feat] = col
-                        val = desc_df.at[0, col]
-                        if pd.notna(val) and val not in [np.inf, -np.inf]:
-                            X.at[0, feat] = float(val)
-                            print(f"🔍 Partial match: '{feat}' -> '{col}'")
-                        break
-                else:
-                    # Feature not found
-                    X.at[0, feat] = 0.0
-                    print(f"❌ Not found: '{feat}'")
+                X.at[0, feat] = 0.0  # Default for missing features
     
-    # Print summary of found features
-    found_count = (X != 0).sum().sum()
-    print(f"\n📈 Successfully mapped {found_count}/{len(required_features)} features (Non-zero)")
-    
-    return X, feature_mapping
+    return X
 
 # =====================================================
 # FEATURE SUMMARY
 # =====================================================
-def print_feature_summary(X, desc_df, model_features, feature_mapping):
-    """Print a summary of feature values with mapping information."""
+def print_feature_summary(X, desc_df, model_features):
+    """Print a summary of feature values."""
     available_columns = [str(c) for c in desc_df.columns]
     
-    print("\n" + "="*60)
+    print("\n" + "="*50)
     print("FEATURE VALUE SUMMARY")
-    print("="*60)
-    
-    print(f"{'Feature Name':<25} {'Mordred Name':<25} {'Value':<15} Status")
-    print("-" * 85)
+    print("="*50)
     
     for feat in model_features:
-        mordred_name = feature_mapping.get(feat, "Not found")
+        mordred_name = DESCRIPTOR_NAME_MAP.get(feat, feat)
         value = X.at[0, feat]
         
         if mordred_name in available_columns:
             original_val = desc_df.at[0, mordred_name]
-            if pd.notna(original_val) and original_val not in [np.inf, -np.inf]:
-                status = "✅ Valid"
-            else:
-                status = "⚠️  NaN/Inf"
+            status = "✅ Valid" if pd.notna(original_val) and original_val not in [np.inf, -np.inf] else "⚠️  NaN/Inf"
+            print(f"{feat:20} ({mordred_name:20}): {value:10.6f} {status}")
         else:
-            status = "❌ Not in Mordred"
-        
-        print(f"{feat:<25} {mordred_name:<25} {value:<15.6f} {status}")
+            print(f"{feat:20} ({mordred_name:20}): {value:10.6f} ⚠️  Not in Mordred")
     
     non_zero_count = (X != 0).sum(axis=1).iloc[0]
-    zero_count = len(model_features) - non_zero_count
-    
-    print("\n" + "="*60)
-    print("FEATURE STATISTICS")
-    print("="*60)
-    print(f"📊 Total features required: {len(model_features)}")
-    print(f"✅ Features with non-zero values: {non_zero_count}")
-    print(f"⚠️  Features with zero/default values: {zero_count}")
+    print(f"\n📊 Features with non-zero values: {non_zero_count}/{len(model_features)}")
 
+# =====================================================
+# PREDICTION PIPELINE
+# =====================================================
+def predict_smiles(smiles: str):
+    """Run the complete prediction pipeline."""
+    print(f"\n🧪 Calculating descriptors for molecule...")
+    
+    # Calculate descriptors
+    desc_df = calculate_descriptors_from_smiles(smiles)
+    
+    # Extract features
+    X = extract_features(desc_df, model_features)
+    
+    # Print feature summary
+    print_feature_summary(X, desc_df, model_features)
+    
 # =====================================================
 # PREDICTION PIPELINE
 # =====================================================
