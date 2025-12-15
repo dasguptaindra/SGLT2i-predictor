@@ -192,7 +192,7 @@ def calculate_descriptors(smiles):
 
 # Helper to convert prediction to label
 def pred_label(pred):
-    return "### **Active**" if pred == 1 else "### **Inactive**"
+    return "### **🟢 Active**" if pred == 1 else "### **🔴 Inactive**"
 
 def create_shap_plot(model, X_external, prediction):
     """Create SHAP plot with error handling"""
@@ -319,7 +319,7 @@ if smiles_input:
                 with col_conf1:
                     st.metric("Confidence Score", f"{confidence:.2%}")
                 with col_conf2:
-                    st.metric("Prediction", "ACTIVE" if y_external_pred == 1 else "INACTIVE")
+                    st.metric("Prediction", "🟢 ACTIVE" if y_external_pred == 1 else "🔴 INACTIVE")
 
             # Separator
             st.markdown("---")
