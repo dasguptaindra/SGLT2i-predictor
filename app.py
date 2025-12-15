@@ -13,7 +13,6 @@ from PIL import Image
 from rdkit import Chem
 from rdkit.Chem import Draw, Lipinski
 from mordred import Calculator, descriptors
-from mordred.AtomTypeEState import AtomTypeEState
 import shap
 
 # -------- Optional Ketcher --------
