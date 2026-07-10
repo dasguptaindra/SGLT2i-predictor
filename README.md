@@ -18,7 +18,7 @@
 
 
 👇 **Click the link to start predicting!**
-🔗 [![Streamlit App](https://img.shields.io/badge/Streamlit-Web%20App-red?logo=streamlit&logoColor=white)](https://sglt2-inhibitor-predictor-mc7uk6jwg5g4bsd8xx4zqz.streamlit.app/)
+🔗 [![Streamlit App](https://img.shields.io/badge/Streamlit-Web%20App-red?logo=streamlit&logoColor=white)](https://sglt2i-predictor.streamlit.app/)
 
 🔬 **Background**
 
