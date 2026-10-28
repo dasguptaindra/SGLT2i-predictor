@@ -25,7 +25,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ================= MODEL LOADING =================
-MODEL_PATH = "gradient_boosting_model.joblib"
+MODEL_PATH = "random_forest_model.joblib"
 FEATURES_PATH = "model_features.json"
 
 model = joblib.load(MODEL_PATH)
