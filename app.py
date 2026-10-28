@@ -35,7 +35,7 @@ st.title("SGLT2i Predictor v1.0: Predict SGLT2 inhibitor(s)")
 
 with st.expander("What is SGLT2i Predictor?", expanded=True):
     st.write('''**SGLT2i Predictor** is a tool that allows users to predict 
-             the SGLT2 inhibitory activity of small molecule (**Potent inhibition** or **Less potent inhibition**) 
+             the SGLT2 inhibitory activity of small molecule (**Potent inhibition** or **Non potent inhibition**) 
              and also provides SHAP-based interpretability.''')
 
 # Two columns: left for sketcher, right for text input
@@ -70,10 +70,10 @@ def calculate_descriptors(smiles):
 
 # Helper to convert prediction to label
 def pred_label(pred):
-    return "### **🟢 Active**" if pred == 1 else "### **🔴 Inactive**"
+    return "### **🟢 Potent inhibitor**" if pred == 1 else "### **🔴 Non potent inhibitor**"
 
 def create_shap_plot(model, X_external, prediction):
-    """Explain Active (class 1) probability using genuine Tree SHAP values."""
+    """Explain Potent inhibitor (class 1) probability using genuine Tree SHAP values."""
     X_external = X_external.loc[:, model.feature_names_in_]
     class_index = list(model.classes_).index(1)
     explainer = shap.TreeExplainer(model)
@@ -118,7 +118,7 @@ def create_shap_plot(model, X_external, prediction):
     ax.tick_params(axis="x", labelsize=13, length=4, colors="black")
     for label in ax.get_xticklabels():
         label.set_fontweight("bold")
-    state = "ACTIVE" if prediction == 1 else "INACTIVE"
+    state = "Potent inhibitor" if prediction == 1 else "Non potent inhibitor"
     title = f"SHAP Waterfall ({state})"
     ax.set_title(title, fontsize=18, fontweight="bold", pad=48, wrap=True)
 
@@ -210,7 +210,7 @@ if st.button("Predict activity", type="primary", disabled=not bool(smiles_input.
                 with col_conf1:
                     st.metric("Predicted-class probability", f"{confidence:.2%}")
                 with col_conf2:
-                    st.metric("Prediction", "🟢 ACTIVE" if y_external_pred == 1 else "🔴 INACTIVE")
+                    st.metric("Prediction", "🟢 Potent inhibitor" if y_external_pred == 1 else "🔴 Non potent inhibitor")
         
         except Exception as e:
             st.error(f"Error during prediction: {str(e)}")
