@@ -1,0 +1,4 @@
+default-jre-headless
+libxrender1
+libxext6
+libsm6
