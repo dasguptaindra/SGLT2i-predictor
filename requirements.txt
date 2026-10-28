@@ -1,17 +1,18 @@
-streamlit>=1.28.0
-pandas>=1.5.0
+streamlit==1.66.1
+pandas==3.1.0
 numpy==2.4.6
+scipy==1.17.1
 joblib==1.5.3
 scikit-learn==1.9.0
-rdkit-pypi
-matplotlib>=3.7.0
-shap>=0.43.0
-mordred>=1.2.0
-padelpy>=0.1.7
-streamlit-ketcher>=0.0.1
-Pillow>=9.0.0
-plotly
-
+rdkit==2026.9.1
+matplotlib==3.11.2
+shap==0.51.0
+mordredcommunity==2.0.7
+streamlit-ketcher==0.0.1
+Pillow==13.0.0
+numba==0.68.1
+llvmlite==0.50.0
+networkx==3.6.1
 
 
 
